@@ -624,6 +624,174 @@ var targetMesh=new THREE.Mesh(new THREE.PlaneGeometry(TARGET_R*2,TARGET_R*2),
   new THREE.MeshLambertMaterial({map:makeTargetTex()}));
 targetMesh.position.set(0,TARGET_Y,TARGET_Z); scene.add(targetMesh);
 
+/* ═══════════════════════════════════════════════════════
+   Neon Advertising Billboards — 네온 광고판 시스템
+   교체: billboards['id'].update(imgUrl)
+         billboards['id'].draw(fn(ctx,w,h))
+═══════════════════════════════════════════════════════ */
+window.billboards={};
+
+function makeNeonBillboard(id,w,h,bx,by,bz,ry,rx,neonHex,accentHex,line1,line2,line3){
+  var neonCSS='#'+neonHex.toString(16).padStart(6,'0');
+  var accentCSS='#'+accentHex.toString(16).padStart(6,'0');
+  var cw=512, ch=Math.max(64,Math.round(cw*h/w));
+  var c=document.createElement('canvas'); c.width=cw; c.height=ch;
+  var g=c.getContext('2d');
+
+  /* ── 배경: 짙은 검정 + 은은한 그라디언트 ── */
+  var bg=g.createLinearGradient(0,0,cw,ch);
+  bg.addColorStop(0,'#030305'); bg.addColorStop(1,'#0a0a10');
+  g.fillStyle=bg; g.fillRect(0,0,cw,ch);
+
+  /* ── 네온 테두리 (겹선) ── */
+  g.shadowColor=neonCSS; g.shadowBlur=18;
+  g.strokeStyle=neonCSS; g.lineWidth=3;
+  g.strokeRect(5,5,cw-10,ch-10);
+  g.shadowBlur=8; g.lineWidth=1.2;
+  g.strokeRect(12,12,cw-24,ch-24);
+
+  /* ── 텍스트 ── */
+  var lines=[line1,line2,line3].filter(Boolean);
+  var n=lines.length;
+  var baseSize=Math.min(Math.round(cw*(n>1?0.115:0.155)), Math.round(ch/(n+0.6)*0.72));
+  lines.forEach(function(txt,i){
+    var sz=(i===0?baseSize:Math.round(baseSize*(i===1&&n>1?0.72:0.55)));
+    g.font='bold '+sz+'px "Arial Black",Arial';
+    g.textAlign='center'; g.textBaseline='middle';
+    var yPos=ch*(0.5+(i-(n-1)/2)*1.15*sz/ch);
+    /* 글로우 레이어 */
+    g.shadowColor=neonCSS; g.shadowBlur=28;
+    g.fillStyle=i===0?'#ffffff':accentCSS;
+    g.fillText(txt,cw/2,yPos);
+    g.shadowBlur=14; g.fillText(txt,cw/2,yPos);
+    /* 선명한 텍스트 */
+    g.shadowBlur=0;
+    g.fillStyle=i===0?'#ffffff':(i===1?accentCSS:'rgba(255,255,255,0.55)');
+    g.fillText(txt,cw/2,yPos);
+  });
+
+  /* ── 스캔라인 (CRT 효과) ── */
+  g.globalAlpha=0.07;
+  for(var sy=0;sy<ch;sy+=3){g.fillStyle='#000';g.fillRect(0,sy,cw,1.2);}
+  g.globalAlpha=1;
+
+  /* ── 하단 컬러 바 ── */
+  var bar=g.createLinearGradient(0,0,cw,0);
+  bar.addColorStop(0,'transparent');
+  bar.addColorStop(0.2,neonCSS);
+  bar.addColorStop(0.8,accentCSS);
+  bar.addColorStop(1,'transparent');
+  g.fillStyle=bar; g.shadowBlur=0;
+  g.fillRect(0,ch-5,cw,5);
+
+  var tex=new THREE.CanvasTexture(c);
+
+  /* ── 광고판 그룹 ── */
+  var grp=new THREE.Group();
+
+  /* 액자 뒤판 */
+  var backMat=new THREE.MeshLambertMaterial({color:0x050508});
+  var backPanel=new THREE.Mesh(new THREE.BoxGeometry(w+0.18,h+0.12,0.06),backMat);
+  backPanel.position.z=-0.04; grp.add(backPanel);
+
+  /* 광고 면 */
+  var face=new THREE.Mesh(new THREE.PlaneGeometry(w,h),
+    new THREE.MeshBasicMaterial({map:tex,side:THREE.DoubleSide}));
+  face.position.z=0.015; grp.add(face);
+
+  /* ── 네온 튜브 프레임 (4변) ── */
+  var tubeMat=new THREE.MeshLambertMaterial({
+    color:0x050508,
+    emissive:new THREE.Color(neonHex),
+    emissiveIntensity:2.2
+  });
+  var tW=0.035, tD=0.04;
+  /* 상단 */
+  var top=new THREE.Mesh(new THREE.BoxGeometry(w+tW*2,tW,tD),tubeMat);
+  top.position.set(0, h/2+tW/2, 0.02); grp.add(top);
+  /* 하단 */
+  var bot=new THREE.Mesh(new THREE.BoxGeometry(w+tW*2,tW,tD),tubeMat);
+  bot.position.set(0,-h/2-tW/2, 0.02); grp.add(bot);
+  /* 좌측 */
+  var lft=new THREE.Mesh(new THREE.BoxGeometry(tW,h,tD),tubeMat);
+  lft.position.set(-w/2-tW/2,0, 0.02); grp.add(lft);
+  /* 우측 */
+  var rgt=new THREE.Mesh(new THREE.BoxGeometry(tW,h,tD),tubeMat);
+  rgt.position.set( w/2+tW/2,0, 0.02); grp.add(rgt);
+
+  /* ── 코너 앵커 볼트 ── */
+  var boltMat=new THREE.MeshLambertMaterial({color:0x333340});
+  [-1,1].forEach(function(sx){[-1,1].forEach(function(sy){
+    var bolt=new THREE.Mesh(new THREE.CylinderGeometry(0.025,0.025,0.06,8),boltMat);
+    bolt.rotation.x=Math.PI/2;
+    bolt.position.set(sx*(w/2+0.04), sy*(h/2+0.04), 0.06);
+    grp.add(bolt);
+  });});
+
+  /* ── 네온 글로우 포인트 라이트 ── */
+  var gl=new THREE.PointLight(new THREE.Color(neonHex),0.55,5.5);
+  gl.position.set(0,0,0.6); grp.add(gl);
+  /* 악센트 라이트 (반대편으로 환경 물듦) */
+  var gl2=new THREE.PointLight(new THREE.Color(accentHex),0.22,3.0);
+  gl2.position.set(0,0,-0.4); grp.add(gl2);
+
+  grp.position.set(bx,by,bz);
+  if(ry) grp.rotation.y=ry;
+  if(rx) grp.rotation.x=rx;
+  scene.add(grp);
+
+  window.billboards[id]={
+    group:grp, face:face, canvas:c, ctx:g, tex:tex, w:w, h:h,
+    update:function(imgUrl){
+      var img=new Image(); img.crossOrigin='anonymous';
+      img.onload=function(){g.clearRect(0,0,cw,ch);g.drawImage(img,0,0,cw,ch);tex.needsUpdate=true;};
+      img.src=imgUrl;
+    },
+    draw:function(fn){g.clearRect(0,0,cw,ch);fn(g,cw,ch);tex.needsUpdate=true;}
+  };
+}
+
+/* ── 1. 뒷벽 프리미엄 광고 (표적 위 — 가장 눈에 잘 띄는 위치) ── */
+makeNeonBillboard('bb_back', 5.2,1.1, 0,2.0,-19.25, 0,0,
+  0x00ffff,0x0088ff,
+  'SPONSOR AD',
+  'YOUR BRAND HERE',
+  'contact@advertise.com');
+
+/* ── 2. 왼쪽 벽 원거리 광고 (표적 옆 구간) ── */
+makeNeonBillboard('bb_left_far', 3.8,0.90, -3.77,0.55,-12, Math.PI/2,0,
+  0xff00cc,0xff88ff,
+  '🎯 AD SPACE',
+  '광고문의 / SPONSOR',
+  null);
+
+/* ── 3. 오른쪽 벽 원거리 광고 ── */
+makeNeonBillboard('bb_right_far', 3.8,0.90, 3.77,0.55,-12, -Math.PI/2,0,
+  0xff6600,0xffcc00,
+  '🔫 AD SPACE',
+  '광고문의 / SPONSOR',
+  null);
+
+/* ── 4. 왼쪽 벽 근거리 광고 (사수 바로 옆) ── */
+makeNeonBillboard('bb_left_near', 3.2,0.80, -3.77,0.55,-4.5, Math.PI/2,0,
+  0x00ff88,0x88ffcc,
+  'AD SPACE',
+  'www.your-brand.com',
+  null);
+
+/* ── 5. 오른쪽 벽 근거리 광고 ── */
+makeNeonBillboard('bb_right_near', 3.2,0.80, 3.77,0.55,-4.5, -Math.PI/2,0,
+  0xffee00,0xff8800,
+  'AD SPACE',
+  'www.your-brand.com',
+  null);
+
+/* ── 6. 뒷벽 하단 가로 배너 (표적 아래) ── */
+makeNeonBillboard('bb_banner', 7.2,0.52, 0,-0.85,-19.25, 0,0,
+  0x8888ff,0xaaccff,
+  '◆  OFFICIAL SPONSOR  ◆  OLYMPIC SHOOTING  ◆  10m AIR PISTOL  ◆  광고문의  ◆',
+  null,null);
+
 /* Bullet Holes */
 var bulletHoles=[];
 function addBulletHole(hx,hy){
