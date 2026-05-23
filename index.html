@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>올림픽 게임 모음 🏅</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #020d1e;
+    color: #fff;
+    font-family: 'Segoe UI', 'Apple SD Gothic Neo', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+  }
+
+  .hero {
+    text-align: center;
+    margin-bottom: 60px;
+  }
+
+  .hero h1 {
+    font-size: clamp(2rem, 6vw, 4rem);
+    font-weight: 900;
+    letter-spacing: -0.02em;
+    background: linear-gradient(135deg, #ffd700 0%, #ffaa00 50%, #ff6600 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 12px;
+  }
+
+  .hero p {
+    font-size: clamp(0.95rem, 2.5vw, 1.2rem);
+    color: #8aaac8;
+    letter-spacing: 0.05em;
+  }
+
+  .rings {
+    font-size: 2rem;
+    margin-bottom: 16px;
+    letter-spacing: 4px;
+  }
+
+  .games {
+    display: flex;
+    gap: 32px;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 900px;
+  }
+
+  .game-card {
+    background: linear-gradient(145deg, #0d1f3a, #0a1828);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 20px;
+    padding: 40px 36px;
+    width: 360px;
+    text-align: center;
+    text-decoration: none;
+    color: inherit;
+    transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .game-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 20px;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+
+  .game-card.archery::before {
+    background: radial-gradient(ellipse at 50% 0%, rgba(100,200,255,0.12), transparent 70%);
+  }
+
+  .game-card.shooting::before {
+    background: radial-gradient(ellipse at 50% 0%, rgba(255,180,80,0.12), transparent 70%);
+  }
+
+  .game-card:hover {
+    transform: translateY(-6px);
+    border-color: rgba(255,255,255,0.18);
+  }
+
+  .game-card.archery:hover { box-shadow: 0 20px 60px rgba(60,160,255,0.25); }
+  .game-card.shooting:hover { box-shadow: 0 20px 60px rgba(255,160,40,0.25); }
+  .game-card:hover::before { opacity: 1; }
+
+  .game-icon {
+    font-size: 4rem;
+    margin-bottom: 20px;
+    display: block;
+    position: relative;
+    z-index: 1;
+  }
+
+  .game-title {
+    font-size: 1.6rem;
+    font-weight: 800;
+    margin-bottom: 10px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .game-card.archery .game-title { color: #64c8ff; }
+  .game-card.shooting .game-title { color: #ffb040; }
+
+  .game-subtitle {
+    font-size: 0.85rem;
+    color: #6688aa;
+    margin-bottom: 20px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    position: relative;
+    z-index: 1;
+  }
+
+  .game-desc {
+    font-size: 0.95rem;
+    color: #99bbd4;
+    line-height: 1.7;
+    margin-bottom: 28px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .tags {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+    position: relative;
+    z-index: 1;
+  }
+
+  .tag {
+    font-size: 0.75rem;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+  }
+
+  .game-card.archery .tag { background: rgba(100,200,255,0.12); color: #64c8ff; }
+  .game-card.shooting .tag { background: rgba(255,176,64,0.12); color: #ffb040; }
+
+  .play-btn {
+    display: inline-block;
+    margin-top: 24px;
+    padding: 12px 32px;
+    border-radius: 40px;
+    font-size: 1rem;
+    font-weight: 700;
+    text-decoration: none;
+    letter-spacing: 0.05em;
+    position: relative;
+    z-index: 1;
+    transition: filter 0.2s;
+  }
+
+  .game-card.archery .play-btn {
+    background: linear-gradient(135deg, #2080cc, #40a0ff);
+    color: #fff;
+  }
+
+  .game-card.shooting .play-btn {
+    background: linear-gradient(135deg, #cc7020, #ff9f40);
+    color: #fff;
+  }
+
+  .play-btn:hover { filter: brightness(1.15); }
+
+  footer {
+    margin-top: 60px;
+    text-align: center;
+    color: #3a5068;
+    font-size: 0.8rem;
+    line-height: 1.8;
+  }
+
+  @media (max-width: 480px) {
+    .game-card { width: 100%; max-width: 360px; padding: 32px 24px; }
+    .games { gap: 20px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="rings">🔵🟡⚫🟢🔴</div>
+  <h1>올림픽 미니게임</h1>
+  <p>브라우저에서 즐기는 올림픽 정밀 스포츠</p>
+</div>
+
+<div class="games">
+
+  <a class="game-card archery" href="archery_game.html">
+    <span class="game-icon">🏹</span>
+    <div class="game-title">양궁</div>
+    <div class="game-subtitle">10m · 18m · 30m ~ 70m</div>
+    <p class="game-desc">
+      실제 올림픽 규정 거리와 바람, 숨·심장박동·근육 떨림까지 구현한
+      3D 양궁 시뮬레이터. 1인·대전·온라인 3vs3 지원.
+    </p>
+    <div class="tags">
+      <span class="tag">1인 플레이</span>
+      <span class="tag">로컬 대전</span>
+      <span class="tag">온라인 3vs3</span>
+      <span class="tag">물리 엔진</span>
+    </div>
+    <span class="play-btn">지금 플레이 →</span>
+  </a>
+
+  <a class="game-card shooting" href="shooting_game.html">
+    <span class="game-icon">🔫</span>
+    <div class="game-title">공기권총</div>
+    <div class="game-subtitle">10m Air Pistol · ISSF 규정</div>
+    <p class="game-desc">
+      ISSF 10m 공기권총 공식 표적과 채점 규정을 적용.
+      피로 누적·반동·호흡 안정화까지 재현한 정밀 사격 게임.
+    </p>
+    <div class="tags">
+      <span class="tag">1인 플레이</span>
+      <span class="tag">4단계 난이도</span>
+      <span class="tag">ISSF 표적</span>
+      <span class="tag">반동 물리</span>
+    </div>
+    <span class="play-btn">지금 플레이 →</span>
+  </a>
+
+</div>
+
+<footer>
+  🏅 Paris 2024 · Olympic Precision Sports Simulator<br>
+  Built with Three.js · WebAudio API · PeerJS
+</footer>
+
+</body>
+</html>
