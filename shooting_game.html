@@ -540,18 +540,12 @@ for(var li=0;li<4;li++){
 }
 
 /* Indoor Range Geometry */
-scene.add(Object.assign(new THREE.Mesh(
-  new THREE.PlaneGeometry(8,22),
-  new THREE.MeshLambertMaterial({color:0x20212a})),
-  {rotation:{x:-Math.PI/2,y:0,z:0}, position:{x:0,y:-1.55,z:-8}}));
-scene.add(Object.assign(new THREE.Mesh(
-  new THREE.PlaneGeometry(8,22),
-  new THREE.MeshLambertMaterial({color:0x111116})),
-  {rotation:{x:Math.PI/2,y:0,z:0}, position:{x:0,y:2.8,z:-8}}));
-scene.add(Object.assign(new THREE.Mesh(
-  new THREE.PlaneGeometry(8,5),
-  new THREE.MeshLambertMaterial({color:0x1c1c24})),
-  {position:{x:0,y:0.65,z:-19.5}}));
+var _floor=new THREE.Mesh(new THREE.PlaneGeometry(8,22),new THREE.MeshLambertMaterial({color:0x20212a}));
+_floor.rotation.set(-Math.PI/2,0,0); _floor.position.set(0,-1.55,-8); scene.add(_floor);
+var _ceil=new THREE.Mesh(new THREE.PlaneGeometry(8,22),new THREE.MeshLambertMaterial({color:0x111116}));
+_ceil.rotation.set(Math.PI/2,0,0); _ceil.position.set(0,2.8,-8); scene.add(_ceil);
+var _bwall=new THREE.Mesh(new THREE.PlaneGeometry(8,5),new THREE.MeshLambertMaterial({color:0x1c1c24}));
+_bwall.position.set(0,0.65,-19.5); scene.add(_bwall);
 [-3.8,3.8].forEach(function(x){
   var w=new THREE.Mesh(new THREE.PlaneGeometry(22,5),
     new THREE.MeshLambertMaterial({color:0x18181f}));
