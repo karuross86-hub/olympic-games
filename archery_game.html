@@ -206,7 +206,26 @@ canvas{position:absolute;inset:0;display:block;}
   color:rgba(255,255,255,.75);font-size:13px;font-weight:600;
   padding:7px 14px;border-radius:50px;cursor:pointer;
   -webkit-tap-highlight-color:transparent;}
+
+/* ── Share Modal ── */
+.sm-box{background:#0d1f3a;border:1px solid rgba(255,255,255,0.10);border-radius:18px;padding:28px 24px;max-width:480px;width:92%;text-align:center;}
+.sm-head{font-size:1.15rem;font-weight:800;color:#FFD700;margin-bottom:16px;letter-spacing:.03em;}
+.sm-card{width:100%;border-radius:8px;margin-bottom:18px;box-shadow:0 4px 20px rgba(0,0,0,0.5);cursor:pointer;}
+.sm-btns{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-bottom:10px;}
+.sm-btn{padding:10px 15px;border:none;border-radius:8px;font-weight:700;font-size:.85rem;cursor:pointer;transition:filter .15s;}
+.sm-btn:hover{filter:brightness(1.18);}
+.sm-btn.kakao{background:#FEE500;color:#3C1E1E;}
+.sm-btn.twitter{background:#1DA1F2;color:#fff;}
+.sm-btn.line{background:#00C300;color:#fff;}
+.sm-btn.copy{background:#1e2f42;color:#adc8e0;border:1px solid rgba(255,255,255,0.08);}
+.sm-btn.save{background:#1e2f42;color:#adc8e0;border:1px solid rgba(255,255,255,0.08);}
+.sm-hint{font-size:.72rem;color:rgba(255,255,255,0.28);margin:4px 0 14px;}
+.sm-close{background:transparent;border:1px solid rgba(255,255,255,0.10);color:#556677;padding:7px 22px;border-radius:6px;cursor:pointer;font-size:.85rem;margin-top:2px;}
+.sm-close:hover{color:#99aabb;border-color:rgba(255,255,255,0.22);}
+.btn-share{background:linear-gradient(135deg,#1a3a5c,#2a5a8c);color:#64c8ff;border:1px solid rgba(100,200,255,0.25);}
+.btn-share:hover{background:linear-gradient(135deg,#2a4a6c,#3a6a9c);border-color:rgba(100,200,255,0.45);}
 </style>
+<script src="https://t1.kakaocdn.net/kakao_js_sdk/2.7.2/kakao.min.js" crossorigin="anonymous"></script>
 </head>
 <body>
 <div id="loading">
@@ -367,6 +386,7 @@ canvas{position:absolute;inset:0;display:block;}
   <div id="multi-results"></div>
   <div id="final-btns">
     <button class="btn btn-dark" onclick="goMenu()">메뉴</button>
+    <button class="btn btn-share" onclick="openShareModal()">📤 공유하기</button>
     <button class="btn btn-gold" onclick="restartGame()">다시 하기</button>
   </div>
 </div>
@@ -2256,5 +2276,150 @@ try{
 </div>
 </div>
 
+
+<!-- ── 점수 공유 모달 ── -->
+<div id="share-modal" style="display:none;position:fixed;inset:0;z-index:600;background:rgba(0,0,0,0.88);align-items:center;justify-content:center;">
+  <div class="sm-box">
+    <div class="sm-head">🏅 결과 공유하기</div>
+    <img id="sm-img" class="sm-card" onclick="smSave()" title="클릭하면 이미지 저장" />
+    <div class="sm-btns">
+      <button class="sm-btn kakao" onclick="smKakao()">💬 카카오톡</button>
+      <button class="sm-btn twitter" onclick="smTwitter()">🐦 트위터 / X</button>
+      <button class="sm-btn line" onclick="smLine()">💚 라인</button>
+      <button class="sm-btn copy" id="sm-copy" onclick="smCopy()">🔗 링크 복사</button>
+      <button class="sm-btn save" onclick="smSave()">💾 이미지 저장</button>
+    </div>
+    <p class="sm-hint">이미지 저장 후 카카오톡에 직접 붙여넣기도 가능합니다</p>
+    <button class="sm-close" onclick="smClose()">닫기</button>
+  </div>
+</div>
+
+
+<script>
+/* ═══════════════════════════════════════
+   점수 공유 시스템 — Score Share (양궁)
+═══════════════════════════════════════ */
+var KAKAO_APP_KEY='YOUR_KAKAO_APP_KEY';
+var SHARE_URL='https://karuross86-hub.github.io/olympic-games/archery_game.html';
+var SHARE_ICON='🏹'; var SHARE_NAME='올림픽 양궁';
+
+function smGrade(pct){
+  if(pct>=.95)return{g:'🏅 금메달권',c:'#FFD700'};
+  if(pct>=.85)return{g:'🥈 은메달권',c:'#C0C0C0'};
+  if(pct>=.75)return{g:'🥉 동메달권',c:'#CD7F32'};
+  if(pct>=.60)return{g:'💪 국가대표 후보',c:'#64c8ff'};
+  if(pct>=.40)return{g:'🎯 동호인 고수',c:'#88ffcc'};
+  return{g:'🔰 입문자',c:'#aaaaaa'};
+}
+
+function buildShareCard(score,maxScore,grade,subLabel,icon,name,url){
+  var cw=600,ch=315,cv=document.createElement('canvas');
+  cv.width=cw;cv.height=ch;var g=cv.getContext('2d');
+  var bg=g.createLinearGradient(0,0,cw,ch);
+  bg.addColorStop(0,'#020d1e');bg.addColorStop(1,'#071828');
+  g.fillStyle=bg;g.fillRect(0,0,cw,ch);
+  var st=g.createLinearGradient(0,0,cw,0);
+  st.addColorStop(0,'transparent');st.addColorStop(.3,'#FFD700');
+  st.addColorStop(.7,'#ff8800');st.addColorStop(1,'transparent');
+  g.fillStyle=st;g.fillRect(0,0,cw,3);
+  g.textAlign='left';
+  g.font='bold 26px Arial';g.fillStyle='#fff';
+  g.shadowColor='rgba(255,200,0,.4)';g.shadowBlur=8;
+  g.fillText(icon+' '+name,30,50);g.shadowBlur=0;
+  g.font='13px Arial';g.fillStyle='#6888aa';
+  g.fillText('나의 올림픽 기록',30,74);
+  g.font='bold 90px "Arial Black",Arial';g.fillStyle='#FFD700';
+  g.shadowColor='rgba(255,215,0,.35)';g.shadowBlur=20;
+  g.fillText(score,30,182);g.shadowBlur=0;
+  var sw=g.measureText(String(score)).width;
+  g.font='bold 24px Arial';g.fillStyle='#aac0d8';
+  g.fillText('점',30+sw+6,170);
+  g.font='bold 19px Arial';g.fillStyle=grade.c;
+  g.shadowColor=grade.c;g.shadowBlur=6;
+  g.fillText(grade.g,30,222);g.shadowBlur=0;
+  if(subLabel){g.font='13px Arial';g.fillStyle='rgba(255,255,255,.32)';g.fillText(subLabel,30,247);}
+  g.textAlign='center';g.font='100px Arial';g.globalAlpha=.08;
+  g.fillStyle='#fff';g.fillText(icon,508,205);g.globalAlpha=1;
+  var rings=['#0085C7','#F4C300','#000','#009F6B','#DF0024'];
+  rings.forEach(function(col,ri){
+    var cx=cw-120+ri*15,cy=ch-34+(ri%2?5:0);
+    g.beginPath();g.arc(cx,cy,7,0,Math.PI*2);
+    g.strokeStyle=col;g.lineWidth=2.2;g.stroke();
+  });
+  g.textAlign='left';g.font='11px Arial';
+  g.fillStyle='rgba(255,255,255,.22)';g.fillText(url,30,ch-14);
+  g.textAlign='right';g.font='bold 14px Arial';
+  g.fillStyle='#64c8ff';g.fillText('나도 도전! →',cw-20,ch-14);
+  g.strokeStyle='rgba(255,255,255,.04)';g.lineWidth=1;
+  g.strokeRect(1,1,cw-2,ch-2);
+  return cv;
+}
+
+function openShareModal(){
+  var pct=totalScore/(MAX_ARROWS*10);
+  var grade=smGrade(pct);
+  var sub=curDiff?curDiff.label+' · '+MAX_ARROWS+'발':'';
+  var card=buildShareCard(totalScore,MAX_ARROWS*10,grade,sub,SHARE_ICON,SHARE_NAME,SHARE_URL);
+  var img=card.toDataURL('image/png');
+  var txt=SHARE_ICON+' '+SHARE_NAME+' '+totalScore+'점 달성! '+grade.g+'\n도전해보세요 👉 '+SHARE_URL;
+  document.getElementById('sm-img').src=img;
+  document.getElementById('sm-img').dataset.dl=img;
+  var m=document.getElementById('share-modal');
+  m.dataset.txt=txt;m.dataset.score=totalScore;
+  m.style.display='flex';
+}
+
+function smClose(){document.getElementById('share-modal').style.display='none';}
+
+function smKakao(){
+  var txt=document.getElementById('share-modal').dataset.txt;
+  if(KAKAO_APP_KEY==='YOUR_KAKAO_APP_KEY'){
+    smCopy();alert('카카오 App Key를 설정하면 바로 공유됩니다.\n링크가 클립보드에 복사됐습니다!');return;
+  }
+  if(typeof Kakao==='undefined'){smCopy();return;}
+  if(!Kakao.isInitialized())Kakao.init(KAKAO_APP_KEY);
+  Kakao.Share.sendDefault({
+    objectType:'feed',
+    content:{
+      title:SHARE_ICON+' '+SHARE_NAME+' '+document.getElementById('share-modal').dataset.score+'점 달성!',
+      description:txt,
+      imageUrl:'https://karuross86-hub.github.io/olympic-games/og_archery.png',
+      link:{mobileWebUrl:SHARE_URL,webUrl:SHARE_URL}
+    },
+    buttons:[{title:'🎮 나도 도전!',link:{mobileWebUrl:SHARE_URL,webUrl:SHARE_URL}}]
+  });
+}
+
+function smTwitter(){
+  var txt=document.getElementById('share-modal').dataset.txt;
+  window.open('https://twitter.com/intent/tweet?text='+encodeURIComponent(txt),'_blank','width=600,height=400');
+}
+
+function smLine(){
+  var txt=document.getElementById('share-modal').dataset.txt;
+  window.open('https://social-plugins.line.me/lineit/share?url='+encodeURIComponent(SHARE_URL)+'&text='+encodeURIComponent(txt),'_blank','width=600,height=500');
+}
+
+function smCopy(){
+  var txt=document.getElementById('share-modal').dataset.txt;
+  navigator.clipboard.writeText(txt).then(function(){
+    var b=document.getElementById('sm-copy');
+    b.textContent='✓ 복사됨!';b.style.background='#1a4a2a';
+    setTimeout(function(){b.textContent='🔗 링크 복사';b.style.background='';},2200);
+  }).catch(function(){
+    var ta=document.createElement('textarea');ta.value=txt;
+    document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);
+    var b=document.getElementById('sm-copy');b.textContent='✓ 복사됨!';
+    setTimeout(function(){b.textContent='🔗 링크 복사';},2200);
+  });
+}
+
+function smSave(){
+  var a=document.createElement('a');
+  a.href=document.getElementById('sm-img').dataset.dl;
+  a.download='olympic_archery_'+document.getElementById('share-modal').dataset.score+'pts.png';
+  a.click();
+}
+</script>
 </body>
 </html>
