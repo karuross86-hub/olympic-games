@@ -27,11 +27,6 @@ canvas{position:absolute;inset:0;display:block;}
 
 #hud{position:absolute;inset:0;z-index:5;pointer-events:none;}
 
-/* ── 비네트 — 화면 가장자리를 눌러 중앙으로 시선을 모은다 ── */
-#vig{position:absolute;inset:0;z-index:4;pointer-events:none;
-  background:radial-gradient(ellipse 76% 66% at 50% 44%,
-    rgba(0,0,0,0) 52%, rgba(10,7,4,.16) 78%, rgba(10,7,4,.42) 100%);}
-
 /* ── 나침반 ── */
 #compass{position:absolute;left:50%;top:12px;transform:translateX(-50%);
   width:232px;height:34px;overflow:hidden;border-radius:10px;}
@@ -149,8 +144,6 @@ canvas{position:absolute;inset:0;display:block;}
 <body>
 
 <canvas id="gl"></canvas>
-
-<div id="vig"></div>
 
 <div id="hud">
   <div id="compass" class="panel">
@@ -391,14 +384,26 @@ function groundNormal(x, z, out) {
   return out;
 }
 
+/* ── 색공간 ──
+   파이프라인이 선형 HDR로 렌더한 뒤 마지막에 ACES 톤매핑 + sRGB 인코딩을 한다.
+   따라서 코드에 적는 색(눈으로 고른 sRGB 값)은 전부 선형으로 바꿔서 넣어야 한다.
+   이걸 빼먹으면 전체가 허옇게 뜬다. */
+const SC = h => new THREE.Color(h).convertSRGBToLinear();
+const s2l = v => Math.pow(v, 2.2);
+
 /* 노면 종류 — 마찰계수와 색을 함께 결정한다 */
 const SURF = {
   ROCK:  { name: '암반', mu: 1.05, col: [0.44, 0.41, 0.38], dust: [0.55, 0.50, 0.45] },
   DIRT:  { name: '흙길', mu: 0.92, col: [0.50, 0.41, 0.27], dust: [0.62, 0.53, 0.36] },
-  GRASS: { name: '초지', mu: 0.85, col: [0.29, 0.35, 0.18], dust: [0.48, 0.46, 0.30] },
+  GRASS: { name: '초지', mu: 0.85, col: [0.26, 0.34, 0.17], dust: [0.48, 0.46, 0.30] },
   SAND:  { name: '모래', mu: 0.62, col: [0.80, 0.69, 0.47], dust: [0.88, 0.78, 0.57] },
   SNOW:  { name: '설원', mu: 0.48, col: [0.91, 0.93, 0.97], dust: [0.95, 0.97, 1.00] },
 };
+// 팔레트를 제자리에서 선형으로 변환 (ROCK_C가 같은 배열을 참조하므로 재할당하지 않는다)
+for (const k in SURF) {
+  const e = SURF[k];
+  for (let i = 0; i < 3; i++) { e.col[i] = s2l(e.col[i]); e.dust[i] = s2l(e.dust[i]); }
+}
 const ROCK_C = SURF.ROCK.col;
 
 /**
@@ -422,20 +427,25 @@ function surfaceAt(x, z, h, slope) {
 /* ═══ §3 렌더러 · 씬 · 하늘 · 조명 ═════════════════════════════════ */
 
 const QUALITY = {
-  low:  { shadow: false, shadowSize: 1024, viewR: 2, farFog: 620,  pixMax: 1.25, veg: 0.45, detail: false, grass: 0,    tracks: 0   },
-  mid:  { shadow: true,  shadowSize: 2048, viewR: 2, farFog: 800,  pixMax: 1.6,  veg: 1.0,  detail: true,  grass: 1400, tracks: 280 },
-  high: { shadow: true,  shadowSize: 3072, viewR: 3, farFog: 1150, pixMax: 2.0,  veg: 1.5,  detail: true,  grass: 2600, tracks: 420 },
+  low:  { shadow: false, shadowSize: 1024, viewR: 2, farFog: 620,  pixMax: 1.25, veg: 0.45, detail: false, grass: 0,    tracks: 0,   bloom: false },
+  mid:  { shadow: true,  shadowSize: 2048, viewR: 2, farFog: 800,  pixMax: 1.6,  veg: 1.0,  detail: true,  grass: 1400, tracks: 280, bloom: true  },
+  high: { shadow: true,  shadowSize: 3072, viewR: 3, farFog: 1150, pixMax: 2.0,  veg: 1.5,  detail: true,  grass: 2600, tracks: 420, bloom: true  },
 };
 let Q = QUALITY.mid;
 
 const canvas = document.getElementById('gl');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.setClearColor(0xd8cbb2);
+renderer.setClearColor(SC(0xd8cbb2));
+/* 씬은 선형 HDR 렌더타깃에 그린다 → 블룸 → 마지막 합성 패스에서 ACES + sRGB.
+   톤매핑을 여기서 켜면 블룸이 이미 눌린 값 위에서 계산되어 힘이 없다. */
+const HDR = renderer.capabilities.isWebGL2;
+renderer.toneMapping = HDR ? THREE.NoToneMapping : THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(62, 1, 0.5, 6000);
 /* 안개색 = 지평선색. 둘이 다르면 원경에 띠가 생겨 즉시 티가 난다. */
-const HAZE = new THREE.Color(0xc9b898);
+const HAZE = SC(0xc9b898);
 scene.fog = new THREE.Fog(HAZE, 340, 800);
 
 /* — 하늘 돔: 그라디언트 + 태양 + 절차적 구름 —
@@ -453,10 +463,10 @@ const GLSL_NOISE = [
 const skyMat = new THREE.ShaderMaterial({
   side: THREE.BackSide, depthWrite: false, fog: false,
   uniforms: {
-    zen:  { value: new THREE.Color(0x3d78b4) },
+    zen:  { value: SC(0x3d78b4) },
     hor:  { value: HAZE.clone() },
-    gnd:  { value: new THREE.Color(0x9a8a70) },
-    sunC: { value: new THREE.Color(0xffdda8) },
+    gnd:  { value: SC(0x9a8a70) },
+    sunC: { value: SC(0xffdda8) },
     sunD: { value: SUN_DIR.clone() },
     time: { value: 0 },
   },
@@ -479,19 +489,19 @@ const skyMat = new THREE.ShaderMaterial({
     // 태양: 원반 + 근접 광륜 + 넓은 산란
     '  float ang = acos(clamp(dot(d, sunD), -1.0, 1.0));',
     '  float disc = 1.0 - smoothstep(0.009, 0.016, ang);',
-    '  c += sunC * (disc * 2.4 + exp(-ang * 24.0) * 0.34 + exp(-ang * 4.0) * 0.10);',
+    '  c += sunC * (disc * 6.0 + exp(-ang * 26.0) * 0.30 + exp(-ang * 5.0) * 0.06);',
     // 구름: 천정 평면에 투영한 fBm. 태양 쪽 면을 밝게 해 입체감을 만든다
     '  if (d.y > 0.012) {',
-    '    vec2 p = d.xz / max(d.y, 0.012) * 0.42 + vec2(time * 0.0045, time * 0.0022);',
+    '    vec2 p = d.xz / max(d.y, 0.012) * 0.30 + vec2(time * 0.0040, time * 0.0020);',
     '    float n = fbm2(p);',
-    '    float cov = smoothstep(0.47, 0.76, n);',
-    '    float edge = smoothstep(0.46, 0.62, n);',
-    '    float fade = smoothstep(0.012, 0.20, d.y);',
+    '    float cov = smoothstep(0.56, 0.86, n);',
+    '    float edge = smoothstep(0.52, 0.70, n);',
+    '    float fade = smoothstep(0.02, 0.30, d.y);',
     '    float lit = 0.45 + 0.55 * pow(max(dot(normalize(vec3(d.x, 0.30, d.z)), sunD), 0.0), 2.2);',
-    '    vec3 cc = mix(vec3(0.55, 0.55, 0.60), vec3(1.0, 0.94, 0.83), lit * edge);',
-    '    c = mix(c, cc, cov * fade * 0.95);',
+    '    vec3 cc = mix(vec3(0.14, 0.16, 0.21), vec3(0.60, 0.54, 0.44), lit * edge);',
+    '    c = mix(c, cc, cov * fade * 0.80);',
     '  }',
-    '  gl_FragColor = vec4(c, 1.0);',
+    '  gl_FragColor = vec4(c * 0.82, 1.0);',
     '}',
   ].join('\n'),
 });
@@ -501,8 +511,11 @@ skyDome.frustumCulled = false;
 scene.add(skyDome);
 
 /* — 조명 — */
-scene.add(new THREE.HemisphereLight(0xaecbe8, 0x6f5a3c, 0.46));
-const sun = new THREE.DirectionalLight(0xffd49a, 1.15);
+/* scene.environment(IBL)가 하늘 앰비언트를 담당한다.
+   여기에 반구광을 더하면 이중 계산이 되어 화면 전체가 허옇게 뜬다.
+   완전한 검정만 막을 정도의 미세한 필만 남긴다. */
+scene.add(new THREE.AmbientLight(SC(0x4a5a6e), 0.06));
+const sun = new THREE.DirectionalLight(SC(0xffd49a), 2.2);
 sun.castShadow = true;
 sun.shadow.camera.left = -80; sun.shadow.camera.right = 80;
 sun.shadow.camera.top = 80;   sun.shadow.camera.bottom = -80;
@@ -567,20 +580,194 @@ function mergeParts(list, flatShade) {
 function tint(g, r, gg, b) {
   const n = g.attributes.position.count;
   const c = new Float32Array(n * 3);
+  r = s2l(r); gg = s2l(gg); b = s2l(b);          // 정점색도 선형이어야 한다
   for (let i = 0; i < n; i++) { c[i * 3] = r; c[i * 3 + 1] = gg; c[i * 3 + 2] = b; }
   g.setAttribute('color', new THREE.BufferAttribute(c, 3));
   return g;
 }
 
+/* ═══ §3c 환경광(IBL) · 포스트 프로세싱 ════════════════════════════
+
+   IBL: 이미 있는 절차적 하늘을 큐브맵으로 한 번 구워 PMREM으로 필터링하고
+   scene.environment에 물린다. HDRI 파일 없이 차체 도장·유리·크롬에 진짜
+   환경 반사가 생긴다 — 사진 같은 인상의 대부분이 여기서 나온다.
+
+   포스트: 씬 → 선형 HDR 렌더타깃 → 밝은 부분 추출 → 분리형 가우시안 →
+   합성(ACES 톤매핑 + 비네트 + 그레인 + sRGB). EffectComposer는 코어
+   번들에 없으므로 렌더타깃과 풀스크린 쿼드로 직접 짠다.
+   ══════════════════════════════════════════════════════════════════ */
+
+let envRT = null;
+
+function buildEnvironment() {
+  const cubeRT = new THREE.WebGLCubeRenderTarget(256);
+  const cubeCam = new THREE.CubeCamera(1, 20000, cubeRT);
+  const skyScene = new THREE.Scene();
+  skyScene.add(new THREE.Mesh(skyDome.geometry, skyMat));
+  // 렌더타깃에 그릴 때 출력 인코딩은 타깃 텍스처를 따르므로(기본 선형)
+  // PMREM이 받는 데이터는 선형이다 — 여기서 sRGB가 섞이면 반사가 허옇게 뜬다
+  cubeCam.update(renderer, skyScene);
+
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  if (envRT) envRT.dispose();
+  envRT = pmrem.fromCubemap(cubeRT.texture);
+  scene.environment = envRT.texture;
+  pmrem.dispose();
+  cubeRT.dispose();
+}
+
+/* — 풀스크린 패스 골격 — */
+const postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const postScene = new THREE.Scene();
+const postQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), null);
+postQuad.frustumCulled = false;
+postScene.add(postQuad);
+
+const PASS_VERT = [
+  'varying vec2 vUv;',
+  'void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+].join('\n');
+
+const brightMat = new THREE.ShaderMaterial({
+  uniforms: { tSrc: { value: null }, thresh: { value: 1.25 }, knee: { value: 0.6 } },
+  vertexShader: PASS_VERT,
+  fragmentShader: [
+    'uniform sampler2D tSrc; uniform float thresh, knee;',
+    'varying vec2 vUv;',
+    'void main(){',
+    '  vec3 c = texture2D(tSrc, vUv).rgb;',
+    '  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));',
+    '  float w = smoothstep(thresh, thresh + knee, l);',
+    '  gl_FragColor = vec4(c * w, 1.0);',
+    '}',
+  ].join('\n'),
+});
+
+const blurMat = new THREE.ShaderMaterial({
+  uniforms: { tSrc: { value: null }, dir: { value: new THREE.Vector2(1, 0) } },
+  vertexShader: PASS_VERT,
+  fragmentShader: [
+    'uniform sampler2D tSrc; uniform vec2 dir;',
+    'varying vec2 vUv;',
+    'void main(){',
+    '  vec3 c = texture2D(tSrc, vUv).rgb * 0.2270270270;',
+    '  c += texture2D(tSrc, vUv + dir * 1.3846153846).rgb * 0.3162162162;',
+    '  c += texture2D(tSrc, vUv - dir * 1.3846153846).rgb * 0.3162162162;',
+    '  c += texture2D(tSrc, vUv + dir * 3.2307692308).rgb * 0.0702702703;',
+    '  c += texture2D(tSrc, vUv - dir * 3.2307692308).rgb * 0.0702702703;',
+    '  gl_FragColor = vec4(c, 1.0);',
+    '}',
+  ].join('\n'),
+});
+
+const compMat = new THREE.ShaderMaterial({
+  uniforms: {
+    tSrc:   { value: null },
+    tBloom: { value: null },
+    bloom:  { value: 0.26 },
+    expo:   { value: 0.85 },
+    sat:    { value: 1.12 },
+    vig:    { value: 0.42 },
+    grain:  { value: 0.013 },
+    time:   { value: 0 },
+  },
+  vertexShader: PASS_VERT,
+  fragmentShader: [
+    'uniform sampler2D tSrc, tBloom;',
+    'uniform float bloom, expo, vig, grain, time, sat;',
+    'varying vec2 vUv;',
+    // ACES 필믹 근사 (Narkowicz)
+    'vec3 aces(vec3 x){',
+    '  return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);',
+    '}',
+    'float hash12(vec2 p){ p = fract(p * vec2(443.897, 441.423)); p += dot(p, p + 19.19); return fract(p.x * p.y); }',
+    'void main(){',
+    '  vec3 c = texture2D(tSrc, vUv).rgb;',
+    '#ifdef USE_BLOOM',
+    '  c += texture2D(tBloom, vUv).rgb * bloom;',
+    '#endif',
+    '  c *= expo;',
+    '#ifdef DO_TONEMAP',
+    '  c = aces(c);',
+    '#endif',
+    // ACES는 하이라이트를 탈색시킨다 → 채도를 조금 되돌린다
+    '  c = max(mix(vec3(dot(c, vec3(0.2126, 0.7152, 0.0722))), c, sat), 0.0);',
+    // 비네트 — 가장자리를 눌러 시선을 중앙으로 모은다
+    '  vec2 q = vUv - 0.5; q.x *= 1.15;',
+    '  c *= 1.0 - vig * smoothstep(0.28, 0.78, dot(q, q));',
+    // 필름 그레인 — 로우폴리 면의 밴딩을 깨준다
+    '  c += (hash12(vUv * 1024.0 + time) - 0.5) * grain;',
+    // 선형 → sRGB
+    '  c = max(c, vec3(0.0));',
+    '  gl_FragColor = vec4(mix(c * 12.92, 1.055 * pow(c, vec3(0.41666)) - 0.055, step(0.0031308, c)), 1.0);',
+    '}',
+  ].join('\n'),
+});
+if (HDR) compMat.defines = { DO_TONEMAP: '' };
+
+let rtScene = null, rtBloomA = null, rtBloomB = null;
+
+function initPost(w, h) {
+  const opt = {
+    minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+    format: THREE.RGBAFormat, type: HDR ? THREE.HalfFloatType : THREE.UnsignedByteType,
+    depthBuffer: true, stencilBuffer: false,
+  };
+  if (rtScene) { rtScene.dispose(); rtBloomA.dispose(); rtBloomB.dispose(); }
+  rtScene = new THREE.WebGLRenderTarget(w, h, opt);
+  const bw = Math.max(1, w >> 1), bh = Math.max(1, h >> 1);
+  rtBloomA = new THREE.WebGLRenderTarget(bw, bh, Object.assign({}, opt, { depthBuffer: false }));
+  rtBloomB = new THREE.WebGLRenderTarget(bw, bh, Object.assign({}, opt, { depthBuffer: false }));
+  compMat.defines = Object.assign({}, HDR ? { DO_TONEMAP: '' } : {}, Q.bloom ? { USE_BLOOM: '' } : {});
+  compMat.needsUpdate = true;
+}
+
+function renderPost(dt) {
+  renderer.setRenderTarget(rtScene);
+  renderer.clear();
+  renderer.render(scene, camera);
+
+  if (Q.bloom) {
+    postQuad.material = brightMat;
+    brightMat.uniforms.tSrc.value = rtScene.texture;
+    renderer.setRenderTarget(rtBloomA);
+    renderer.render(postScene, postCam);
+
+    postQuad.material = blurMat;
+    const bw = rtBloomA.width, bh = rtBloomA.height;
+    for (let i = 0; i < 2; i++) {                    // 2회 반복 = 더 넓은 번짐
+      blurMat.uniforms.tSrc.value = rtBloomA.texture;
+      blurMat.uniforms.dir.value.set(1 / bw, 0);
+      renderer.setRenderTarget(rtBloomB);
+      renderer.render(postScene, postCam);
+
+      blurMat.uniforms.tSrc.value = rtBloomB.texture;
+      blurMat.uniforms.dir.value.set(0, 1 / bh);
+      renderer.setRenderTarget(rtBloomA);
+      renderer.render(postScene, postCam);
+    }
+  }
+
+  postQuad.material = compMat;
+  compMat.uniforms.tSrc.value = rtScene.texture;
+  compMat.uniforms.tBloom.value = rtBloomA.texture;
+  compMat.uniforms.time.value += dt;
+  renderer.setRenderTarget(null);
+  renderer.render(postScene, postCam);
+}
+
 /* ═══ §4 지형 청크 ═════════════════════════════════════════════════ */
 
-const terrainMat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+const terrainMat = new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide,
+  roughness: 0.95, metalness: 0.0, envMapIntensity: 1.0 });
 
 /* 식생은 전부 이 재질 하나를 쓴다.
    나무/잎 구분은 지오메트리에 구운 정점색으로, 개체별 편차는 instanceColor로 준다.
    (r128은 프래그먼트에서 USE_COLOR만 보므로 vertexColors:true가 반드시 필요하다) */
-const vegMat = new THREE.MeshLambertMaterial({ vertexColors: true });
-const grassMat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+const vegMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, metalness: 0.0,
+  envMapIntensity: 1.0 });
+const grassMat = new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide,
+  roughness: 0.85, metalness: 0.0, envMapIntensity: 1.0 });
 
 /* 정점 색은 2.5m 간격이라 가까이 가면 뭉갠 것처럼 보인다.
    월드 좌표 기반 노이즈를 프래그먼트에서 곱해 픽셀 단위 결을 만든다.
@@ -598,15 +785,11 @@ terrainMat.onBeforeCompile = shader => {
      '          + vn2(vWP.xz * 9.0)  * 0.23;',
      '  diffuseColor.rgb *= 0.74 + g * 0.56;',
      '  float hu = vn2(vWP.xz * 0.16 + 21.3) - 0.5;',      // 마른 풀 ↔ 젖은 흙
-     '  diffuseColor.r *= 1.0 + hu * 0.24;',
+     '  diffuseColor.r *= 1.0 + hu * 0.15;',
      '  diffuseColor.g *= 1.0 + hu * 0.05;',
      '  diffuseColor.b *= 1.0 - hu * 0.20;',
      '#endif'].join('\n'));
 };
-const rockMat = new THREE.MeshLambertMaterial({ color: 0x8b8177 });
-const trunkMat = new THREE.MeshLambertMaterial({ color: 0x5b432c });
-const leafMat = new THREE.MeshLambertMaterial({ color: 0x3f6134 });
-
 /* — 식생 5종. 각 종은 줄기+잎이 하나의 지오메트리로 병합되어 있어
      나무 한 그루가 인스턴스 하나로 끝난다. — */
 const BARK = [0.32, 0.23, 0.15], BARK2 = [0.40, 0.34, 0.26];
@@ -945,18 +1128,25 @@ function nearbyObstacles(x, z, out) {
 
 const WHEEL_R = 0.42;
 
-const paintMat   = new THREE.MeshPhongMaterial({ color: 0xb85a22, shininess: 38, specular: 0x2e2a26 });
-const plasticMat = new THREE.MeshPhongMaterial({ color: 0x1e2227, shininess: 14, specular: 0x151515 });
-const rubberMat  = new THREE.MeshPhongMaterial({ color: 0x131518, shininess: 5,  specular: 0x0e0e0e });
-const metalMat   = new THREE.MeshPhongMaterial({ color: 0x99a1aa, shininess: 88, specular: 0xcfd6dd });
-const glassMat   = new THREE.MeshPhongMaterial({ color: 0x16242f, shininess: 120, specular: 0xaac4d8,
-                                                 transparent: true, opacity: 0.62 });
-const lampMat    = new THREE.MeshBasicMaterial({ color: 0xfff3cf });
-const tailMat    = new THREE.MeshBasicMaterial({ color: 0xcc3226 });
-const canvasMat  = new THREE.MeshPhongMaterial({ color: 0xc0b391, shininess: 8 });
-const oliveMat   = new THREE.MeshPhongMaterial({ color: 0x4a5540, shininess: 18 });
-const accentMat  = new THREE.MeshPhongMaterial({ color: 0xdb9a2e, shininess: 26 });
-const interiorMat = new THREE.MeshPhongMaterial({ color: 0x2a2f35, shininess: 10 });
+/* 차량 재질 — 환경 반사(scene.environment)를 받는 PBR.
+   "비싸 보이는" 인상의 대부분은 모델 디테일이 아니라 여기서 나온다. */
+const paintMat = new THREE.MeshPhysicalMaterial({
+  color: SC(0xb0541e), roughness: 0.48, metalness: 0.10,
+  clearcoat: 0.28, clearcoatRoughness: 0.34, envMapIntensity: 0.60 });
+const plasticMat = new THREE.MeshStandardMaterial({ color: SC(0x1e2227), roughness: 0.72, metalness: 0.05 });
+const rubberMat  = new THREE.MeshStandardMaterial({ color: SC(0x131518), roughness: 0.93, metalness: 0.0 });
+const metalMat   = new THREE.MeshStandardMaterial({ color: SC(0x9aa3ac), roughness: 0.36, metalness: 0.88,
+                                                    envMapIntensity: 1.0 });
+const glassMat   = new THREE.MeshPhysicalMaterial({ color: SC(0x16242f), roughness: 0.05, metalness: 0.0,
+                                                    transparent: true, opacity: 0.55,
+                                                    clearcoat: 1.0, envMapIntensity: 1.5 });
+// 램프는 1.0을 넘겨 두면 블룸이 걸려 실제로 빛나 보인다
+const lampMat    = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.0, 1.7, 1.15) });
+const tailMat    = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.15, 0.14, 0.09) });
+const canvasMat  = new THREE.MeshStandardMaterial({ color: SC(0xc0b391), roughness: 0.88, metalness: 0.0 });
+const oliveMat   = new THREE.MeshStandardMaterial({ color: SC(0x4a5540), roughness: 0.62, metalness: 0.25 });
+const accentMat  = new THREE.MeshStandardMaterial({ color: SC(0xdb9a2e), roughness: 0.55, metalness: 0.1 });
+const interiorMat = new THREE.MeshStandardMaterial({ color: SC(0x2a2f35), roughness: 0.80, metalness: 0.05 });
 
 function buildTruck() {
   const P = [], D = [], M = [], GL = [], L = [], R = [], C = [], O = [], A = [], IN = [];
@@ -1559,7 +1749,7 @@ function makeGrassTuft() {
       for (const k of [a0, a1, a2]) {
         pos.push(P[k][0], P[k][1], P[k][2]);
         const t = P[k][1] / h;
-        col.push(0.13 + t * 0.17, 0.16 + t * 0.20, 0.08 + t * 0.09);
+        col.push(s2l(0.13 + t * 0.17), s2l(0.16 + t * 0.20), s2l(0.08 + t * 0.09));
       }
     };
     tri(0, 1, 2); tri(1, 3, 2); tri(2, 3, 4);
@@ -1961,10 +2151,12 @@ let running = false, paused = true, menuOpen = true;
 
 function resize() {
   const w = innerWidth, h = innerHeight;
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, Q.pixMax));
+  const dpr = Math.min(window.devicePixelRatio || 1, Q.pixMax);
+  renderer.setPixelRatio(dpr);
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  initPost(Math.max(2, Math.floor(w * dpr)), Math.max(2, Math.floor(h * dpr)));
 }
 addEventListener('resize', resize);
 
@@ -2035,7 +2227,7 @@ function frame(now) {
   }
 
   updateHUD(dt);
-  renderer.render(scene, camera);
+  renderPost(dt);
 }
 
 /* — 메뉴 / 시작 — */
@@ -2081,6 +2273,7 @@ function startGame() {
   if (Q.detail) terrainMat.defines = { TERRAIN_DETAIL: '' };
   camera.far = Q.farFog * 6;
   truckRoot.traverse(o => { if (o.isMesh) o.castShadow = Q.shadow; });
+  buildEnvironment();
   resize();
 
   const sp = findSpawn();
