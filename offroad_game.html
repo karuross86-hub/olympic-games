@@ -125,6 +125,15 @@ canvas{position:absolute;inset:0;display:block;}
   color:#a9c2d6;transition:all .15s;}
 .opt.sel{background:rgba(255,182,72,.18);border-color:#ffb648;color:#ffd48a;}
 .opt small{display:block;font-size:.64rem;font-weight:600;color:#6d879c;margin-top:3px;}
+.volrow{display:flex;align-items:center;gap:12px;}
+.volrow input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:4px;
+  border-radius:3px;background:rgba(255,255,255,.18);outline:none;}
+.volrow input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;
+  width:16px;height:16px;border-radius:50%;background:#ffb648;cursor:pointer;
+  box-shadow:0 1px 4px rgba(0,0,0,.5);}
+.volrow input[type=range]::-moz-range-thumb{width:16px;height:16px;border:none;
+  border-radius:50%;background:#ffb648;cursor:pointer;}
+.volrow span{font-size:.78rem;color:#a9c2d6;width:26px;text-align:right;}
 .card .btn.go{width:100%;padding:15px;font-size:1.02rem;margin-top:6px;}
 .note{font-size:.7rem;color:#59728a;line-height:1.7;margin-top:16px;}
 
@@ -178,6 +187,7 @@ canvas{position:absolute;inset:0;display:block;}
 
   <div id="sideBtns">
     <button class="btn btn-dark" id="bCam" title="카메라 전환">🎥</button>
+    <button class="btn btn-dark" id="bSound" title="소리 끄기/켜기">🔊</button>
     <button class="btn btn-dark" id="bReset" title="차량 복구">↺</button>
     <button class="btn btn-dark" id="bMenu" title="메뉴">≡</button>
   </div>
@@ -210,6 +220,14 @@ canvas{position:absolute;inset:0;display:block;}
       </div>
     </div>
 
+    <div class="sect" id="volSect">
+      <h3>소리</h3>
+      <div class="volrow">
+        <input type="range" id="volRange" min="0" max="100" value="70" aria-label="볼륨">
+        <span id="volVal" class="mono">70</span>
+      </div>
+    </div>
+
     <div class="sect" id="kbHelp">
       <h3>조작 (키보드)</h3>
       <div class="keys">
@@ -219,6 +237,7 @@ canvas{position:absolute;inset:0;display:block;}
         <kbd>Space</kbd><span>핸드브레이크 (뒷바퀴 락)</span>
         <kbd>Shift</kbd><span>디프 록 (그립 보정)</span>
         <kbd>C</kbd><span>카메라 전환</span>
+        <kbd>M</kbd><span>소리 끄기/켜기</span>
         <kbd>R</kbd><span>차량 복구</span>
       </div>
     </div>
@@ -1934,6 +1953,302 @@ function updateTracks(dt) {
   }
 }
 
+/* ═══ §7d 구동계 (기어 · RPM) ══════════════════════════════════════
+
+   물리에는 관여하지 않는다 — 엔진음과 HUD를 위한 모델이다.
+   기존 HUD는 속도로 기어를 흉내 냈는데, 그 위에 엔진음을 얹으면
+   변속할 때 음이 안 끊겨서 즉시 가짜인 게 들린다.
+   ══════════════════════════════════════════════════════════════════ */
+
+/* 기어비는 차량의 실제 최고속(약 110 km/h)에 맞춰야 한다.
+   승용차 기준으로 잡으면 5단이 250 km/h용이 되어 평생 1단만 쓰게 된다.
+   33인치 타이어를 신은 헤비 4x4라 트랜스퍼 케이스 감속을 함께 넣는다. */
+const GEARS = [4.02, 2.77, 1.91, 1.32, 0.91];
+const FINAL = 4.10, TRANSFER = 2.00, REV_RATIO = 4.30;
+const IDLE_RPM = 800, REDLINE = 5800, SHIFT_UP = 4900, SHIFT_DOWN = 1750;
+const CYL_PER_REV = 3;                     // 6기통 4행정 → 회전당 폭발 3회
+
+const dt_train = {
+  gear: 0,            // 0..4 = 1~5단, -1 = 후진
+  rpm: IDLE_RPM,
+  shiftT: 0,          // 변속 중 남은 시간
+  load: 0,
+};
+
+function updateDrivetrain(dt) {
+  const fwd = car.vel.dot(carFwd);
+  const wheelRad = Math.abs(fwd) / WHEEL_R;           // rad/s
+  const reversing = fwd < -0.6;
+
+  if (dt_train.shiftT > 0) dt_train.shiftT -= dt;
+
+  if (reversing) {
+    dt_train.gear = -1;
+  } else if (dt_train.gear < 0 && fwd > -0.2) {
+    dt_train.gear = 0;
+  }
+
+  const ratio = dt_train.gear < 0 ? REV_RATIO : GEARS[dt_train.gear];
+  const geared = wheelRad * ratio * FINAL * TRANSFER * 9.5493;
+
+  /* 클러치 — 출발할 때 엔진 회전은 일정하게 물려 있고 바퀴가 따라붙는다.
+     회전수를 속도에 그대로 묶으면 출발 직후 회전이 올랐다 떨어져 엔진이
+     꺼지는 것처럼 들린다. 기어 회전이 그 지점을 넘어설 때 맞물린다. */
+  const launch = IDLE_RPM + input.gas * 2600;
+  let rpm = (input.gas > 0.1 && geared < launch) ? launch : Math.max(geared, IDLE_RPM);
+
+  if (dt_train.shiftT <= 0 && dt_train.gear >= 0) {
+    if (rpm > SHIFT_UP && dt_train.gear < GEARS.length - 1 && input.gas > 0.2) {
+      dt_train.gear++; dt_train.shiftT = 0.28;
+    } else if (rpm < SHIFT_DOWN && dt_train.gear > 0) {
+      dt_train.gear--; dt_train.shiftT = 0.22;
+    }
+  }
+
+  // 변속 중에는 회전이 떨어졌다 붙는다
+  const target = dt_train.shiftT > 0 ? Math.min(rpm, REDLINE) * 0.72 : Math.min(rpm, REDLINE);
+  dt_train.rpm += (target - dt_train.rpm) * Math.min(dt * 9, 1);
+
+  // 부하 — 가속 중이고 회전이 낮을수록 무겁게 울린다
+  const climb = -carFwd.y;
+  dt_train.load = clamp(input.gas * (0.55 + climb * 1.2) + (dt_train.rpm < 2200 ? 0.25 : 0), 0, 1.2);
+}
+
+/* ═══ §7e 사운드 ═══════════════════════════════════════════════════
+
+   오디오 파일 없이 WebAudio로 전부 합성한다.
+     · 엔진 : 폭발 주파수의 배음으로 만든 PeriodicWave 2개(디튠) + 서브 사인
+              + 대역 노이즈. 저역 통과 컷오프를 회전수·스로틀로 움직인다.
+     · 노면 : 노이즈 하나를 여러 필터로 갈라 타이어·슬립·바람을 만든다.
+     · 충격 : 착지와 충돌 때만 노드를 즉석에서 만들고 버린다.
+   ══════════════════════════════════════════════════════════════════ */
+
+const Sfx = (function () {
+  let ctx = null, master = null, on = false, muted = false, vol = 0.7;
+  let engWave = null, osc1, osc2, sub, gO1, gO2, gSub, gGrit, bpGrit, lpEng, gEng;
+  let noiseBuf = null, noiseSrc = null;
+  let bpTire, gTire, bpSkid, gSkid, lpWind, gWind;
+
+  const ramp = (param, v, tc) => {
+    if (ctx) param.setTargetAtTime(v, ctx.currentTime, tc || 0.05);
+  };
+
+  function makeNoise(sec) {
+    const n = Math.floor(ctx.sampleRate * sec);
+    const b = ctx.createBuffer(1, n, ctx.sampleRate);
+    const d = b.getChannelData(0);
+    let last = 0;
+    for (let i = 0; i < n; i++) {
+      const w = Math.random() * 2 - 1;
+      last = (last + 0.02 * w) / 1.02;      // 살짝 붉힌 노이즈가 덜 쏘인다
+      d[i] = w * 0.7 + last * 3.0;
+    }
+    return b;
+  }
+
+  function init() {
+    if (on) return true;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return false;
+    try {
+      ctx = new AC();
+    } catch (e) { return false; }
+
+    master = ctx.createGain();
+    master.gain.value = muted ? 0 : vol;
+    master.connect(ctx.destination);
+
+    // 엔진 배음 프로파일 — 짝수 배음을 눌러 4행정 특유의 결을 낸다
+    const N = 18;
+    const re = new Float32Array(N), im = new Float32Array(N);
+    for (let i = 1; i < N; i++) {
+      im[i] = (1 / i) * (i % 2 === 0 ? 0.55 : 1.0) * Math.exp(-i * 0.11);
+    }
+    engWave = ctx.createPeriodicWave(re, im, { disableNormalization: false });
+
+    const engBus = ctx.createGain();
+    engBus.gain.value = 1;
+
+    osc1 = ctx.createOscillator(); osc1.setPeriodicWave(engWave);
+    osc2 = ctx.createOscillator(); osc2.setPeriodicWave(engWave); osc2.detune.value = 11;
+    sub  = ctx.createOscillator(); sub.type = 'sine';
+    gO1 = ctx.createGain(); gO1.gain.value = 0.55;
+    gO2 = ctx.createGain(); gO2.gain.value = 0.32;
+    gSub = ctx.createGain(); gSub.gain.value = 0.40;
+    osc1.connect(gO1).connect(engBus);
+    osc2.connect(gO2).connect(engBus);
+    sub.connect(gSub).connect(engBus);
+
+    noiseBuf = makeNoise(2.5);
+    noiseSrc = ctx.createBufferSource();
+    noiseSrc.buffer = noiseBuf; noiseSrc.loop = true;
+
+    bpGrit = ctx.createBiquadFilter(); bpGrit.type = 'bandpass'; bpGrit.Q.value = 0.8;
+    gGrit = ctx.createGain(); gGrit.gain.value = 0;
+    noiseSrc.connect(bpGrit).connect(gGrit).connect(engBus);
+
+    lpEng = ctx.createBiquadFilter(); lpEng.type = 'lowpass'; lpEng.frequency.value = 700; lpEng.Q.value = 0.6;
+    gEng = ctx.createGain(); gEng.gain.value = 0;
+    engBus.connect(lpEng).connect(gEng).connect(master);
+
+    bpTire = ctx.createBiquadFilter(); bpTire.type = 'bandpass'; bpTire.frequency.value = 1200; bpTire.Q.value = 0.5;
+    gTire = ctx.createGain(); gTire.gain.value = 0;
+    noiseSrc.connect(bpTire).connect(gTire).connect(master);
+
+    bpSkid = ctx.createBiquadFilter(); bpSkid.type = 'bandpass'; bpSkid.frequency.value = 2600; bpSkid.Q.value = 2.2;
+    gSkid = ctx.createGain(); gSkid.gain.value = 0;
+    noiseSrc.connect(bpSkid).connect(gSkid).connect(master);
+
+    lpWind = ctx.createBiquadFilter(); lpWind.type = 'lowpass'; lpWind.frequency.value = 500;
+    gWind = ctx.createGain(); gWind.gain.value = 0;
+    noiseSrc.connect(lpWind).connect(gWind).connect(master);
+
+    osc1.start(); osc2.start(); sub.start(); noiseSrc.start();
+    on = true;
+    return true;
+  }
+
+  function update(dt, st) {
+    if (!on || ctx.state !== 'running') return;
+    const fire = st.rpm / 60 * CYL_PER_REV;
+
+    ramp(osc1.frequency, fire, 0.03);
+    ramp(osc2.frequency, fire, 0.03);
+    ramp(sub.frequency, fire * 0.5, 0.03);
+
+    const rev = clamp((st.rpm - IDLE_RPM) / (REDLINE - IDLE_RPM), 0, 1);
+    const cut = st.shifting ? 0.45 : 1;
+    ramp(gEng.gain, (0.11 + rev * 0.16 + st.load * 0.10) * cut, 0.05);
+    ramp(lpEng.frequency, 320 + st.rpm * 0.34 + st.throttle * 1100, 0.06);
+    ramp(bpGrit.frequency, 240 + fire * 3.2, 0.06);
+    ramp(gGrit.gain, (0.05 + st.throttle * 0.16) * cut, 0.06);
+    ramp(gSub.gain, 0.30 + st.load * 0.22, 0.08);
+
+    // 타이어 — 노면에 따라 대역을 옮긴다
+    const sp = Math.min(st.speed / 16, 1);
+    ramp(gTire.gain, sp * st.contact * 0.20, 0.08);
+    ramp(bpTire.frequency, st.surfHz + st.speed * 22, 0.10);
+
+    ramp(gSkid.gain, Math.min(st.slip, 1) * st.contact * 0.16, 0.05);
+
+    const ws = Math.min(st.speed / 30, 1.3);
+    ramp(gWind.gain, ws * ws * 0.16, 0.12);
+    ramp(lpWind.frequency, 400 + st.speed * 34, 0.12);
+  }
+
+  /* — 일회성 소리: 노드를 즉석에서 만들고 끝나면 버린다 — */
+  function burst(freq, q, peak, decay, type) {
+    if (!on || ctx.state !== 'running') return;
+    const t = ctx.currentTime;
+    const n = ctx.createBufferSource();
+    n.buffer = noiseBuf;
+    n.playbackRate.value = 0.8 + Math.random() * 0.4;
+    const f = ctx.createBiquadFilter();
+    f.type = type || 'bandpass'; f.frequency.value = freq; f.Q.value = q;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(peak, t + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + decay);
+    n.connect(f).connect(g).connect(master);
+    n.start(t); n.stop(t + decay + 0.02);
+  }
+
+  function thud(v) {
+    if (!on || ctx.state !== 'running') return;
+    v = clamp(v, 0, 1);
+    const t = ctx.currentTime;
+    const o = ctx.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(115, t);
+    o.frequency.exponentialRampToValueAtTime(36, t + 0.20);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.55 * v, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + 0.34);
+    o.connect(g).connect(master);
+    o.start(t); o.stop(t + 0.36);
+    burst(300 + v * 260, 0.7, 0.30 * v, 0.22);      // 서스펜션이 받는 소리
+  }
+
+  function clang(v) {
+    v = clamp(v, 0, 1);
+    burst(2200, 3.5, 0.26 * v, 0.35);
+    burst(760, 1.6, 0.22 * v, 0.28);
+    thud(v * 0.7);
+  }
+
+  function blip() { burst(1500, 4.0, 0.10, 0.06); }
+
+  function setVolume(v) { vol = clamp(v, 0, 1); if (master) ramp(master.gain, muted ? 0 : vol, 0.05); }
+  function toggleMute() {
+    muted = !muted;
+    if (master) ramp(master.gain, muted ? 0 : vol, 0.05);
+    return muted;
+  }
+  function isMuted() { return muted; }
+  function getVolume() { return vol; }
+  function resume() { if (ctx && ctx.state === 'suspended') ctx.resume(); }
+  function setPaused(p) {
+    if (!on) return;
+    if (p) { if (ctx.state === 'running') ctx.suspend(); }
+    else { resume(); }
+  }
+  function available() { return on; }
+
+  return { init, update, thud, clang, blip, setVolume, getVolume,
+           toggleMute, isMuted, setPaused, resume, available };
+})();
+
+/* 사운드 입력 상태 — 매 프레임 물리에서 뽑아 §7e로 넘긴다 */
+let sfxAirVelY = 0, sfxPrevAir = 0, sfxBumpCd = 0;
+
+function updateSfx(dt) {
+  if (!Sfx.available()) return;
+
+  let contact = 0, slip = 0, surfHz = 1200;
+  for (const w of wheels) {
+    if (!w.grounded) continue;
+    contact += 0.25;
+    if (w.slip > slip) slip = w.slip;
+    if (w.surf === SURF.SAND) surfHz = 620;
+    else if (w.surf === SURF.SNOW) surfHz = 520;
+    else if (w.surf === SURF.ROCK) surfHz = 2100;
+    else if (w.surf === SURF.GRASS) surfHz = 900;
+    else surfHz = 1400;
+  }
+
+  Sfx.update(dt, {
+    rpm: dt_train.rpm,
+    throttle: input.gas,
+    load: dt_train.load,
+    shifting: dt_train.shiftT > 0,
+    speed: car.vel.length(),
+    contact: contact,
+    slip: slip,
+    surfHz: surfHz,
+  });
+
+  // 착지 — 공중에 있는 동안 낙하 속도를 기억해 뒀다가 접지하는 순간 쓴다
+  if (car.airborne > 0) sfxAirVelY = Math.min(sfxAirVelY, car.vel.y);
+  if (sfxPrevAir > 0.18 && car.airborne === 0) {
+    Sfx.thud(clamp(-sfxAirVelY / 11, 0.15, 1));
+    sfxAirVelY = 0;
+  }
+  if (car.airborne === 0) sfxAirVelY = 0;
+  sfxPrevAir = car.airborne;
+
+  // 노면 충격 — 서스펜션이 바닥을 치면
+  sfxBumpCd -= dt;
+  if (sfxBumpCd <= 0) {
+    for (const w of wheels) {
+      if (w.grounded && w.comp > SUS.travel * 0.96 && w.load > 30000) {
+        Sfx.thud(0.28);
+        sfxBumpCd = 0.22;
+        break;
+      }
+    }
+  }
+}
+
 /* ═══ §8 카메라 ════════════════════════════════════════════════════ */
 
 const CAM_MODES = [
@@ -1984,11 +2299,15 @@ addEventListener('keydown', e => {
   keys[e.code] = true;
   if (e.code === 'KeyR') resetCar(true);
   else if (e.code === 'KeyC') cycleCam();
+  else if (e.code === 'KeyM') toggleSound();
   else if (e.code === 'Escape') toggleMenu();
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].indexOf(e.code) >= 0) e.preventDefault();
 });
 addEventListener('keyup', e => { keys[e.code] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+document.addEventListener('visibilitychange', () => {
+  Sfx.setPaused(document.hidden || menuOpen);
+});
 
 let steerSmooth = 0;
 const touchState = { steer: 0, gas: 0, brake: 0, hand: false };
@@ -2113,10 +2432,9 @@ function updateHUD(dt) {
   const kmh = car.vel.length() * 3.6;
   uiSpd.textContent = Math.round(kmh);
 
-  uiGear.textContent = fwdSpeed < -0.6 ? 'R'
-    : (Math.abs(fwdSpeed) < 0.5 ? 'N' : String(Math.min(5, 1 + Math.floor(Math.abs(fwdSpeed) / 6.6))));
-  const rpm = clamp((Math.abs(fwdSpeed) % 6.6) / 6.6 * 0.6 + (input.gas ? 0.35 : 0.05) + Math.min(kmh / 220, 0.3), 0.04, 1);
-  uiRpm.style.width = (rpm * 100).toFixed(0) + '%';
+  uiGear.textContent = dt_train.gear < 0 ? 'R'
+    : (Math.abs(fwdSpeed) < 0.5 && input.gas === 0 ? 'N' : String(dt_train.gear + 1));
+  uiRpm.style.width = (clamp(dt_train.rpm / REDLINE, 0.04, 1) * 100).toFixed(0) + '%';
 
   for (let i = 0; i < 4; i++) {
     const w = wheels[i];
@@ -2200,6 +2518,8 @@ function frame(now) {
       spawnDust(w.contact.x, w.contact.y, w.contact.z, w.surf.dust, p);
     }
   }
+  updateDrivetrain(dt);
+  updateSfx(dt);
   updateDust(dt);
   updateTracks(dt);
   updateGrass();
@@ -2223,6 +2543,7 @@ function frame(now) {
   }
   if (car.hardHit > 5) {
     toast('충돌 · ' + Math.round(car.hardHit * 3.6) + ' km/h', 1100);
+    Sfx.clang(clamp(car.hardHit / 14, 0.3, 1));
     car.hardHit = 0;
   }
 
@@ -2238,13 +2559,30 @@ function toggleMenu() {
   menuOpen = !menuOpen;
   paused = menuOpen;
   intro.style.display = menuOpen ? 'flex' : 'none';
+  Sfx.setPaused(menuOpen);
 }
 
 function cycleCam() {
   camMode = (camMode + 1) % CAM_MODES.length;
   camInit = false;
+  Sfx.blip();
   toast('카메라 · ' + CAM_MODES[camMode].name, 1000);
 }
+
+function toggleSound() {
+  const m = Sfx.toggleMute();
+  el('bSound').textContent = m ? '🔇' : '🔊';
+  toast(m ? '소리 꺼짐' : '소리 켜짐', 900);
+  if (!m) Sfx.blip();
+}
+
+el('bSound').addEventListener('click', toggleSound);
+const volRange = el('volRange'), volVal = el('volVal');
+volRange.addEventListener('input', () => {
+  const v = +volRange.value;
+  volVal.textContent = v;
+  Sfx.setVolume(v / 100);
+});
 
 el('bCam').addEventListener('click', cycleCam);
 el('bReset').addEventListener('click', () => { resetCar(true); toast('차량 복구', 900); });
@@ -2261,6 +2599,11 @@ for (const o of qOpts.children) o.addEventListener('click', () => selectQ(o.data
 selectQ(qKey);
 
 function startGame() {
+  // AudioContext는 사용자 제스처 안에서만 열 수 있다 — 시작 버튼 클릭이 그 지점이다
+  Sfx.init();
+  Sfx.setVolume(+el('volRange').value / 100);
+  Sfx.resume();
+
   if (running) { toggleMenu(); return; }
 
   Q = QUALITY[qKey];
@@ -2299,6 +2642,9 @@ function startGame() {
   running = true;
   lastT = 0;
   accum = 0;
+  dt_train.gear = 0;
+  dt_train.rpm = IDLE_RPM;
+  Sfx.setPaused(false);
   toast('출발 — 지형을 읽으며 달리세요', 2200);
 }
 
