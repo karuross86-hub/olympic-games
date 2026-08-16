@@ -86,6 +86,10 @@
     background: radial-gradient(ellipse at 50% 0%, rgba(255,180,80,0.12), transparent 70%);
   }
 
+  .game-card.offroad::before {
+    background: radial-gradient(ellipse at 50% 0%, rgba(120,200,140,0.12), transparent 70%);
+  }
+
   .game-card:hover {
     transform: translateY(-6px);
     border-color: rgba(255,255,255,0.18);
@@ -93,6 +97,7 @@
 
   .game-card.archery:hover { box-shadow: 0 20px 60px rgba(60,160,255,0.25); }
   .game-card.shooting:hover { box-shadow: 0 20px 60px rgba(255,160,40,0.25); }
+  .game-card.offroad:hover { box-shadow: 0 20px 60px rgba(90,190,120,0.25); }
   .game-card:hover::before { opacity: 1; }
 
   .game-icon {
@@ -113,6 +118,7 @@
 
   .game-card.archery .game-title { color: #64c8ff; }
   .game-card.shooting .game-title { color: #ffb040; }
+  .game-card.offroad .game-title { color: #6fd08c; }
 
   .game-subtitle {
     font-size: 0.85rem;
@@ -152,6 +158,7 @@
 
   .game-card.archery .tag { background: rgba(100,200,255,0.12); color: #64c8ff; }
   .game-card.shooting .tag { background: rgba(255,176,64,0.12); color: #ffb040; }
+  .game-card.offroad .tag { background: rgba(111,208,140,0.12); color: #6fd08c; }
 
   .play-btn {
     display: inline-block;
@@ -177,6 +184,11 @@
     color: #fff;
   }
 
+  .game-card.offroad .play-btn {
+    background: linear-gradient(135deg, #2f8a52, #58bf7f);
+    color: #fff;
+  }
+
   .play-btn:hover { filter: brightness(1.15); }
 
   footer {
@@ -198,7 +210,7 @@
 <div class="hero">
   <div class="rings">🔵🟡⚫🟢🔴</div>
   <h1>올림픽 미니게임</h1>
-  <p>브라우저에서 즐기는 올림픽 정밀 스포츠</p>
+  <p>브라우저에서 즐기는 3D 게임</p>
 </div>
 
 <div class="games">
@@ -237,10 +249,27 @@
     <span class="play-btn">지금 플레이 →</span>
   </a>
 
+  <a class="game-card offroad" href="offroad_game.html">
+    <span class="game-icon">🚙</span>
+    <div class="game-title">오프로드 원정</div>
+    <div class="game-subtitle">Overland · Prototype 1</div>
+    <p class="game-desc">
+      절차적으로 생성되는 무한 지형을 4륜구동으로 주파합니다.
+      레이캐스트 서스펜션과 타이어 마찰 원을 직접 구현한 주행 프로토타입.
+    </p>
+    <div class="tags">
+      <span class="tag">무한 지형</span>
+      <span class="tag">차량 물리</span>
+      <span class="tag">노면 5종</span>
+      <span class="tag">모바일 지원</span>
+    </div>
+    <span class="play-btn">지금 플레이 →</span>
+  </a>
+
 </div>
 
 <footer>
-  🏅 Paris 2024 · Olympic Precision Sports Simulator<br>
+  🏅 Olympic Precision Sports · 🚙 Overland<br>
   Built with Three.js · WebAudio API · PeerJS
 </footer>
 
